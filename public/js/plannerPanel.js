@@ -1,13 +1,16 @@
 /**
  * Fichier : /js/plannerPanel.js
  *
+ * VERSION AUTONOME (Refonte V2)
  * Gère le panneau latéral et affiche les résultats
- * de l'API Google Directions.
+ * de notre propre 'localPathfinder.js'.
  *
- * CORRECTIONS :
- * 1. Suggestions (Autocomplete) limitées STRICTEMENT à la zone.
- * 2. Garde le nom du lieu dans le champ après sélection
- * (ne remplace plus par des coordonnées).
+ * SUPPRIMÉ :
+ * - Toute dépendance à l'API Google Maps Places (initAutocomplete).
+ *
+ * MODIFIÉ :
+ * - displayItinerary() et createLegStep() pour lire le format
+ * de réponse de notre 'localPathfinder'.
  */
 export class PlannerPanel {
     constructor(panelId, dataManager, mapRenderer, searchCallback) {
@@ -25,95 +28,113 @@ export class PlannerPanel {
         this.summaryContainer = document.getElementById('itinerary-summary');
         this.stepsContainer = document.getElementById('itinerary-steps');
 
-        // Stocke les coordonnées si une suggestion est cliquée
-        this.fromCoords = null;
-        this.toCoords = null;
+        // Divs pour les résultats de recherche (remplace Google Autocomplete)
+        this.fromResults = this.createResultsContainer(this.fromInput);
+        this.toResults = this.createResultsContainer(this.toInput);
+
+        // Stocke les coordonnées ou le nom de l'arrêt
+        this.fromValue = null;
+        this.toValue = null;
 
         this.bindEvents();
         
-        // Initialiser l'autocomplétion
-        window.initMap = () => {
-            console.log("Google Maps JS est prêt, initialisation de l'autocomplete.");
-            this.initAutocomplete(); 
-        };
-        if (typeof google !== 'undefined' && typeof google.maps !== 'undefined') {
-            this.initAutocomplete();
-        }
+        // Cacher les résultats si on clique ailleurs
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.input-group')) {
+                 this.fromResults.classList.add('hidden');
+                 this.toResults.classList.add('hidden');
+            }
+        });
     }
-    
-    initAutocomplete() {
-        if (typeof google === 'undefined' || !google.maps.places) {
-            console.warn("Google Places API n'est pas chargée. Les suggestions ne fonctionneront pas.");
+
+    /**
+     * Crée un conteneur de résultats sous un champ de saisie
+     */
+    createResultsContainer(inputElement) {
+        const container = document.createElement('div');
+        container.className = 'planner-search-results hidden';
+        inputElement.parentNode.insertBefore(container, inputElement.nextSibling);
+        return container;
+    }
+
+    /**
+     * Remplace l'autocomplétion Google par une recherche locale
+     */
+    handleLocalSearch(e, resultsContainer, valueTarget) {
+        const query = e.target.value.toLowerCase();
+        resultsContainer.innerHTML = '';
+        
+        if (query.length < 2) {
+            resultsContainer.classList.add('hidden');
             return;
         }
 
-        const center = { lat: 45.1833, lng: 0.7167 }; // Périgueux
-        const defaultBounds = {
-            north: center.lat + 0.3,
-            south: center.lat - 0.3,
-            east: center.lng + 0.3,
-            west: center.lng - 0.3,
-        };
-        
-        const options = {
-            bounds: defaultBounds,
-            componentRestrictions: { country: "fr" },
-            // --- CORRECTION "UNIQUEMENT DORDOGNE" ---
-            strictBounds: true, // Force les résultats à être dans cette zone
-            fields: ["name", "formatted_address", "geometry"],
-        };
-        
-        const fromAutocomplete = new google.maps.places.Autocomplete(this.fromInput, options);
-        const toAutocomplete = new google.maps.places.Autocomplete(this.toInput, options);
+        const matches = this.dataManager.masterStops
+            .filter(stop => stop.stop_name.toLowerCase().includes(query))
+            .slice(0, 5); // 5 résultats max
 
-        // --- CORRECTION "GARDER LES NOMS" ---
-        fromAutocomplete.addListener('place_changed', () => {
-            const place = fromAutocomplete.getPlace();
-            if (place.geometry) {
-                const loc = place.geometry.location;
-                // On stocke les coordonnées pour la recherche
-                this.fromCoords = `${loc.lat()},${loc.lng()}`;
-                // Mais on affiche le nom dans le champ
-                this.fromInput.value = place.name;
-            }
-        });
-        
-        toAutocomplete.addListener('place_changed', () => {
-             const place = toAutocomplete.getPlace();
-             if (place.geometry) {
-                const loc = place.geometry.location;
-                this.toCoords = `${loc.lat()},${loc.lng()}`;
-                this.toInput.value = place.name;
-            }
-        });
+        if (matches.length === 0) {
+            resultsContainer.classList.add('hidden');
+            return;
+        }
 
-        // Si l'utilisateur tape sans choisir, on efface les coordonnées stockées
-        this.fromInput.addEventListener('input', () => { this.fromCoords = null; });
-        this.toInput.addEventListener('input', () => { this.toCoords = null; });
+        matches.forEach(stop => {
+            const item = document.createElement('div');
+            item.className = 'planner-result-item';
+            const regex = new RegExp(`(${query})`, 'gi');
+            item.innerHTML = stop.stop_name.replace(regex, '<strong>$1</strong>');
+            
+            item.addEventListener('click', () => {
+                e.target.value = stop.stop_name; // Affiche le nom
+                this[valueTarget] = stop.stop_name; // Stocke le nom pour la recherche
+                resultsContainer.classList.add('hidden');
+            });
+            resultsContainer.appendChild(item);
+        });
+        resultsContainer.classList.remove('hidden');
     }
 
     bindEvents() {
+        // Recherche locale pour le champ "Départ"
+        this.fromInput.addEventListener('input', (e) => {
+            this.handleLocalSearch(e, this.fromResults, 'fromValue');
+            this.fromValue = e.target.value; // Au cas où ils tapent une coord
+        });
+        // Garde les résultats ouverts si on clique dans le champ
+        this.fromInput.addEventListener('focus', (e) => {
+            this.handleLocalSearch(e, this.fromResults, 'fromValue');
+        });
+        
+        // Recherche locale pour le champ "Arrivée"
+        this.toInput.addEventListener('input', (e) => {
+            this.handleLocalSearch(e, this.toResults, 'toValue');
+            this.toValue = e.target.value; // Au cas où ils tapent une coord
+        });
+        // Garde les résultats ouverts si on clique dans le champ
+        this.toInput.addEventListener('focus', (e) => {
+            this.handleLocalSearch(e, this.toResults, 'toValue');
+        });
+
+        // Bouton de recherche
         this.searchButton.addEventListener('click', () => {
-            // S'il y a des coordonnées stockées (clic sur suggestion), on les utilise
-            // Sinon, on utilise le texte tapé (ex: "marsac")
-            const from = this.fromCoords || this.fromInput.value;
-            const to = this.toCoords || this.toInput.value;
+            // Utilise la valeur stockée (nom d'arrêt ou coord)
+            const from = this.fromValue || this.fromInput.value;
+            const to = this.toValue || this.toInput.value;
 
             if (from && to) {
                 this.showLoading();
                 this.searchCallback(from, to); // Appelle main.js
             }
-            // Réinitialiser après la recherche
-            this.fromCoords = null;
-            this.toCoords = null;
         });
 
+        // Bouton "Ma Position"
         this.locateButton.addEventListener('click', () => {
-            this.mapRenderer.map.locate({ setView: true, maxZoom: 16 })
+            this.mapRenderer.map.locate({ setView: false, maxZoom: 16 })
                 .on('locationfound', (e) => {
                     const coords = `${e.latlng.lat.toFixed(5)},${e.latlng.lng.toFixed(5)}`;
                     this.fromInput.value = "Ma position"; // Affiche "Ma position"
-                    this.fromCoords = coords; // Stocke les coordonnées
+                    this.fromValue = coords; // Stocke les coordonnées
+                    this.fromResults.classList.add('hidden'); // Cache les suggestions
                 })
                 .on('locationerror', (e) => {
                     alert("Impossible de vous localiser.");
@@ -137,80 +158,97 @@ export class PlannerPanel {
     }
 
     /**
-     * Affiche l'itinéraire (réponse Google) dans le panneau
+     * Affiche l'itinéraire (réponse de localPathfinder) dans le panneau
      */
     displayItinerary(itineraryData) {
         this.hideLoading();
         this.stepsContainer.innerHTML = '';
 
-        if (!itineraryData.routes || itineraryData.routes.length === 0) {
+        if (itineraryData.status !== 'OK' || !itineraryData.path || itineraryData.path.length === 0) {
             this.showError("Aucun itinéraire trouvé.");
             return;
         }
 
-        const route = itineraryData.routes[0];
-        const leg = route.legs[0]; 
+        const legs = itineraryData.path;
+        const totalDuration = itineraryData.stats.duration;
+        
+        const firstLeg = legs[0];
+        const lastLeg = legs[legs.length - 1];
 
-        const duration = this.dataManager.formatDuration(leg.duration.value);
-        const departureText = leg.departure_time?.text;
-        const arrivalText = leg.arrival_time?.text;
+        // Formater les heures de départ et d'arrivée
+        const departureTime = this.dataManager.formatTime(firstLeg.startTime).substring(0, 5);
+        const arrivalTime = this.dataManager.formatTime(lastLeg.endTime).substring(0, 5);
 
         this.summaryContainer.innerHTML = `
-            <h4>Le plus rapide : ${duration}</h4>
-            ${ (departureText && arrivalText) ?
-                `<p>${departureText} &ndash; ${arrivalText}</p>` :
-                '' 
-            }
+            <h4>Le plus rapide : ${this.dataManager.formatDuration(totalDuration)}</h4>
+            <p>${departureTime} &ndash; ${arrivalTime}</p>
         `;
 
-        leg.steps.forEach(step => {
-            this.stepsContainer.appendChild(this.createLegStep(step));
+        legs.forEach(leg => {
+            this.stepsContainer.appendChild(this.createLegStep(leg));
         });
     }
 
-    /** Crée une étape de trajet (Marche ou Bus) */
-    createLegStep(step) {
+    /** Crée une étape de trajet (Marche ou Bus) à partir de notre format local */
+    createLegStep(leg) {
         const el = document.createElement('div');
         el.className = 'itinerary-leg';
-        el.dataset.mode = step.travel_mode;
+        el.dataset.mode = leg.type;
 
-        const legDuration = step.duration.text;
-        const startTime = step.departure_time?.text || '';
+        const legDuration = this.dataManager.formatDuration(leg.duration);
+        const startTime = this.dataManager.formatTime(leg.startTime).substring(0, 5);
 
         let icon, details;
 
-        if (step.travel_mode === 'WALKING') {
+        if (leg.type === 'WALK') {
             icon = 'directions_walk';
-            details = `
-                <strong>${step.html_instructions}</strong>
-                <div class="leg-time-info">${legDuration} (${step.distance.text})</div>
-            `;
-        } else if (step.travel_mode === 'TRANSIT') {
-            icon = 'directions_bus';
-            const transit = step.transit_details;
-            const line = transit.line;
-            // Utilise la couleur du badge fournie par l'API
-            const routeColor = line.color || '#333';
-            const textColor = line.text_color || this.getContrastColor(routeColor);
+            const distance = leg.distance > 1000 
+                ? `${(leg.distance / 1000).toFixed(1)} km`
+                : `${Math.round(leg.distance)} m`;
+            
+            let instruction = "Marcher";
+            if (leg.fromStopName) {
+                instruction = `Marcher de <strong>${leg.fromStopName}</strong>`;
+            } else if (leg.fromCoords) {
+                instruction = `Marcher de <strong>votre point de départ</strong>`;
+            }
+            
+            if (leg.toStopName) {
+                instruction += ` à <strong>${leg.toStopName}</strong>`;
+            } else if (leg.toCoords) {
+                instruction += ` à <strong>votre destination</strong>`;
+            }
 
             details = `
-                <div class="leg-time-info">${startTime} - Prendre à <strong>${transit.departure_stop.name}</strong></div>
+                <strong>${instruction}</strong>
+                <div class="leg-time-info">${legDuration} (${distance})</div>
+            `;
+        } else if (leg.type === 'BUS') {
+            icon = 'directions_bus';
+            const transit = leg;
+            const line = transit.route;
+            
+            const routeColor = line.route_color ? `#${line.route_color}` : '#333';
+            const textColor = line.route_text_color ? `#${line.route_text_color}` : this.getContrastColor(routeColor);
+
+            details = `
+                <div class="leg-time-info">${startTime} - Prendre à <strong>${transit.fromStopName}</strong></div>
                 <div class="leg-route">
                     <span class="leg-badge" style="background-color: ${routeColor}; color: ${textColor};">
-                        ${line.short_name || line.name}
+                        ${line.route_short_name || line.route_id}
                     </span>
                     <strong>Direction ${transit.headsign}</strong>
                 </div>
                 <div class="leg-time-info">
-                    ${transit.num_stops} arrêt(s) (${legDuration})
+                    ${legDuration}
                 </div>
                 <div class="leg-time-info" style="margin-top: 5px;">
-                    Descendre à <strong>${transit.arrival_stop.name}</strong>
+                    Descendre à <strong>${transit.toStopName}</strong>
                 </div>
             `;
         } else {
             icon = 'help';
-            details = `<strong>${step.html_instructions}</strong>`;
+            details = `<strong>Étape inconnue</strong>`;
         }
 
         el.innerHTML = `
