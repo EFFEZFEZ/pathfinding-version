@@ -4,6 +4,8 @@
  *
  * NOTE (V6):
  * - Logique "block_id" (tripsByBlockId, findNextTripInBlock) SUPPRIMÉE
+ * - AJOUT (V7): Fonctions calculateDistance et findStopsWithinRadius
+ * pour le LocalPathfinder.
  */
 
 export class DataManager {
@@ -82,10 +84,7 @@ export class DataManager {
             // Indexer les trips
             this.trips.forEach(trip => {
                 this.tripsByTripId[trip.trip_id] = trip;
-                // La logique block_id a été retirée d'ici
             });
-            
-            // Le tri des blocks a été retiré d'ici
 
             // Regrouper les arrêts (logique V4 améliorée)
             this.groupNearbyStops();
@@ -98,7 +97,7 @@ export class DataManager {
 
         } catch (error) {
             console.error('Erreur fatale lors du chargement des données:', error);
-            this.showError('Erreur de chargement des données', 'Vérifiez que les fichiers GTFS sont présents dans /public/data/gtfs/ et que map.geojson est dans /public/data/.');
+            this.showError('Erreur de chargement des données', 'Vérifiez que les fichiers GTFS sont présents dans /data/gtfs/ et que map.geojson est dans /data/.');
             this.isLoaded = false;
         }
         return this.isLoaded;
@@ -108,6 +107,7 @@ export class DataManager {
      * Charge un fichier GTFS (CSV)
      */
     async loadGTFSFile(filename) {
+        // CORRECTION : Le chemin est ./data/ et non /public/data/
         const response = await fetch(`./data/gtfs/${filename}`);
         if (!response.ok) {
             throw new Error(`Impossible de charger ${filename}: ${response.statusText}`);
@@ -298,6 +298,7 @@ export class DataManager {
      * Convertit le temps HH:MM:SS en secondes
      */
     timeToSeconds(timeStr) {
+        if (!timeStr) return 0;
         const [hours, minutes, seconds] = timeStr.split(':').map(Number);
         return hours * 3600 + minutes * 60 + seconds;
     }
@@ -318,6 +319,50 @@ export class DataManager {
     toRad(value) {
         return value * Math.PI / 180;
     }
+
+    // =============================================
+    // NOUVELLES FONCTIONS (pour LocalPathfinder)
+    // =============================================
+
+    /**
+     * Calcule la distance (en mètres) entre deux points GPS (Formule Haversine)
+     * Nécessaire pour localPathfinder.
+     */
+    calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371000; // Rayon de la Terre en mètres
+        const dLat = this.toRad(lat2 - lat1);
+        const dLon = this.toRad(lon2 - lon1);
+        const a =
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(this.toRad(lat1)) * Math.cos(this.toRad(lat2)) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const d = R * c;
+        return d;
+    }
+
+    /**
+     * Trouve tous les arrêts "maîtres" dans un rayon donné
+     * Nécessaire pour localPathfinder.
+     */
+    findStopsWithinRadius(coords, radiusMeters) {
+        const foundStops = [];
+        this.masterStops.forEach(stop => {
+            const distance = this.calculateDistance(
+                coords.lat, coords.lon,
+                stop.stop_lat, stop.stop_lon
+            );
+            if (distance <= radiusMeters) {
+                foundStops.push({ stop, distance });
+            }
+        });
+        return foundStops.sort((a, b) => a.distance - b.distance);
+    }
+    
+    // =============================================
+    // FIN DES NOUVELLES FONCTIONS
+    // =============================================
+
 
     /**
      * Récupère le service_id pour la date donnée
@@ -378,8 +423,6 @@ export class DataManager {
         });
         return activeTrips;
     }
-    
-    // La fonction findNextTripInBlock a été supprimée
 
     /**
      * Récupère la destination finale d'un trip (V4)
@@ -394,8 +437,6 @@ export class DataManager {
         
         return stopInfo ? stopInfo.stop_name : 'Destination inconnue';
     }
-
-    // ... (autres fonctions utilitaires: getDailyServiceBounds, findFirstActiveSecond, findNextActiveSecond...)
 
     /**
      * Récupère les bornes de service (début/fin) pour la journée
@@ -454,7 +495,6 @@ export class DataManager {
         return nextActiveTime;
     }
 
-    // *** CORRECTION: La fonction est déplacée ICI ***
     /**
      * Convertit un nombre de secondes en chaîne de caractères "X h Y min"
      */
@@ -466,8 +506,14 @@ export class DataManager {
         if (hours > 0) {
             str += `${hours} h `;
         }
-        if (minutes > 0 || hours === 0) { // Affiche "0 min" si 0s
+        if (minutes > 0 || (hours === 0 && totalSeconds < 60)) {
+            // Affiche 0 min si moins d'une minute
             str += `${minutes} min`;
+        }
+        if (str.trim() === "") {
+             // Gère le cas de 0 seconde
+             if(totalSeconds > 0) return "< 1 min";
+             return "0 min";
         }
         return str.trim();
     }
