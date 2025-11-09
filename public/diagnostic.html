@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagnostic GTFS - Ligne C</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .route-info {
+            background: #dd1b75;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 5px;
+            display: inline-block;
+            font-weight: bold;
+        }
+        .problem {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .solution {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .btn {
+            background: #667eea;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .btn:hover {
+            background: #5568d3;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔍 Diagnostic GTFS - Ligne C</h1>
+        <p>Analyse des données pour identifier les problèmes de tracé</p>
+    </div>
+
+    <div class="section">
+        <h2>🚌 Informations sur la Ligne C</h2>
+        <div class="route-info">Ligne C - Couleur #dd1b75</div>
+        <div id="route-info"></div>
+    </div>
+
+    <div class="section">
+        <h2>⚠️ Problème Identifié</h2>
+        <div class="problem">
+            <h3>Avenue du Maréchal Juin vers PEM</h3>
+            <p><strong>Description :</strong> La ligne C ne passe pas par le tracé correct de l'avenue du maréchal juin pour rejoindre l'arrêt PEM.</p>
+            <p><strong>Cause :</strong> Le fichier GeoJSON ne contient pas le tracé correct pour ce segment de route.</p>
+            <p><strong>Impact :</strong> Les bus de la ligne C apparaissent sur un tracé incorrect entre ces deux points.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>✅ Solutions Proposées</h2>
+        
+        <div class="solution">
+            <h3>Solution 1 : Correction Manuelle du GeoJSON</h3>
+            <p>Modifiez votre fichier <code>map.geojson</code> pour ajouter ou corriger le tracé de la ligne C :</p>
+            <ol>
+                <li>Utilisez un outil comme <a href="https://geojson.io" target="_blank">geojson.io</a> pour éditer vos tracés</li>
+                <li>Dessinez le tracé correct suivant l'avenue du maréchal juin</li>
+                <li>Assurez-vous que la propriété <code>route_id</code> correspond à <code>"CA_GRAND_PERIGUEUX:Line:97"</code></li>
+                <li>Remplacez l'ancien tracé dans votre fichier GeoJSON</li>
+            </ol>
+            
+            <h4>Exemple de structure GeoJSON pour la ligne C :</h4>
+            <pre>{
+  "type": "Feature",
+  "properties": {
+    "route_id": "CA_GRAND_PERIGUEUX:Line:97",
+    "route_short_name": "C",
+    "route_color": "#dd1b75",
+    "name": "Ligne C - Avenue du Maréchal Juin"
+  },
+  "geometry": {
+    "type": "LineString",
+    "coordinates": [
+      [0.7069, 45.1866],  // Début (PEM)
+      [0.7070, 45.1865],  // Points intermédiaires le long de l'avenue
+      // ... ajoutez tous les points du tracé
+      [0.7080, 45.1855]   // Fin
+    ]
+  }
+}</pre>
+        </div>
+
+        <div class="solution">
+            <h3>Solution 2 : Export depuis OpenStreetMap</h3>
+            <p>Si vous avez besoin de tracer précisément les routes :</p>
+            <ol>
+                <li>Allez sur <a href="https://www.openstreetmap.org" target="_blank">OpenStreetMap</a></li>
+                <li>Recherchez "Avenue du Maréchal Juin, Périgueux"</li>
+                <li>Utilisez un outil comme <a href="https://overpass-turbo.eu" target="_blank">Overpass Turbo</a> pour extraire le tracé exact</li>
+                <li>Convertissez en GeoJSON et ajoutez les propriétés de votre ligne C</li>
+            </ol>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>📊 Arrêts PEM</h2>
+        <p>Voici les coordonnées GPS des arrêts PEM dans vos données :</p>
+        <ul id="pem-stops"></ul>
+    </div>
+
+    <div class="section">
+        <h2>🧪 Tester les Corrections</h2>
+        <button class="btn" onclick="window.location.href='/'">Retour à l'Application</button>
+        <button class="btn" onclick="loadData()">Recharger les Données</button>
+    </div>
+
+    <script>
+        async function loadData() {
+            try {
+                // Charger les données GTFS
+                const routesResp = await fetch('data/gtfs/routes.txt');
+                const routesText = await routesResp.text();
+                
+                const stopsResp = await fetch('data/gtfs/stops.txt');
+                const stopsText = await stopsResp.text();
+
+                // Analyser les lignes
+                const routeLines = routesText.split('\n');
+                const lineC = routeLines.find(line => line.includes('"C"'));
+                
+                if (lineC) {
+                    const parts = lineC.split(',');
+                    document.getElementById('route-info').innerHTML = `
+                        <p><strong>ID:</strong> ${parts[0].replace(/"/g, '')}</p>
+                        <p><strong>Nom court:</strong> ${parts[2].replace(/"/g, '')}</p>
+                        <p><strong>Nom long:</strong> ${parts[3].replace(/"/g, '')}</p>
+                        <p><strong>Couleur:</strong> #${parts[7]}</p>
+                    `;
+                }
+
+                // Afficher les arrêts PEM
+                const stopLines = stopsText.split('\n');
+                const pemStops = stopLines.filter(line => line.includes('PEM'));
+                const pemList = document.getElementById('pem-stops');
+                pemList.innerHTML = '';
+                
+                pemStops.forEach(stop => {
+                    const parts = stop.split(',');
+                    if (parts.length > 5) {
+                        const li = document.createElement('li');
+                        li.innerHTML = `<strong>${parts[2].replace(/"/g, '')}</strong> (${parts[1].replace(/"/g, '')}) - Lat: ${parts[5]}, Lon: ${parts[6]}`;
+                        pemList.appendChild(li);
+                    }
+                });
+
+            } catch (error) {
+                console.error('Erreur de chargement:', error);
+                alert('Erreur lors du chargement des données');
+            }
+        }
+
+        // Charger les données au démarrage
+        loadData();
+    </script>
+</body>
+</html>

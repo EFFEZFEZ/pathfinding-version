@@ -1,0 +1,63 @@
+Tu es un assistant de développement expérimenté.
+Crée une application web complète (HTML + JS + CSS, sans backend lourd) qui affiche en temps réel théorique la position des bus d’un réseau, à partir de fichiers GTFS et GeoJSON fournis localement par l’utilisateur.
+
+🎯 Objectif :
+
+Une carte interactive OpenStreetMap qui montre les lignes de bus (GeoJSON) et des icônes animées représentant les bus qui se déplacent selon les horaires GTFS, avec zoom et déplacement possibles.
+
+L’affichage doit évoluer en fonction du temps simulé, avec une horloge interne synchronisée sur les horaires GTFS (trips.txt, stop_times.txt, routes.txt, stops.txt, etc.).
+
+📦 Structure du projet :
+/public
+  index.html
+  style.css
+  /data
+    gtfs/ (je mettrai mes fichiers GTFS ici)
+    map.geojson (je mettrai mon fichier GeoJSON ici)
+  /js
+    main.js              -> orchestre tout le projet
+    dataManager.js       -> charge et parse les GTFS + GeoJSON
+    timeManager.js       -> gère le temps simulé (pause, accélération)
+    tripScheduler.js     -> calcule les trajets actifs à un instant T
+    busPositionCalculator.js -> calcule les positions entre deux arrêts
+    mapRenderer.js        -> initialise la carte Leaflet et gère les marqueurs bus
+
+💻 Fonctionnalités demandées :
+
+Carte interactive basée sur Leaflet + OpenStreetMap
+
+Chargement automatique des données GTFS/GeoJSON placées dans /public/data/
+
+Animation des bus sur les tracés en fonction de l’heure simulée
+
+Boutons pour Play / Pause / Vitesse x2 / x4 / x8 / Reset
+
+Possibilité d’afficher les noms de ligne, et le numéro de course
+
+Gestion fluide du rendu (interpolation des positions pour éviter les sauts)
+
+🚀 Ce que doit faire Replit AI :
+
+Générer tout le code front-end complet : HTML, CSS, JS
+
+Inclure la logique de parsing GTFS, de calcul des positions, et d’affichage sur la carte
+
+Ajouter des commentaires clairs dans le code pour m’indiquer où mettre mes propres fichiers (GTFS et GeoJSON)
+
+Aucune dépendance serveur : tout doit tourner en local via un navigateur
+
+📁 Ce que je ferai moi-même :
+
+Fournir mes fichiers GTFS (dans /public/data/gtfs/)
+
+Fournir mon fichier map.geojson des lignes
+
+Lancer le projet et observer les bus bouger sur la carte
+
+✅ Bonus (si possible) :
+
+Quand je clique sur un bus, afficher une popup : nom de la ligne, destination, et heure théorique d’arrivée au prochain arrêt.
+
+Quand je clique sur une ligne, la surligner sur la carte.
+
+Objectif final : une carte animée, autonome, et basée uniquement sur les données locales GTFS + GeoJSON.

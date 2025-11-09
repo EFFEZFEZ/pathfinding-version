@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bus en Temps Réel - Périgueux</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
+          crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.1/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.1/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.1/dist/leaflet.markercluster.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+
+    <link rel="stylesheet" href="style.css">
+
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAU0OABc_T8AODV3UorpdYXsBVUFYMqMfQ&libraries=places&callback=initMap" 
+            async defer></script>
+
+</head>
+<body>
+    
+    <div id="app">
+        
+        <div id="top-bar">
+            <div class="header-title">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M19 18h-2a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/>
+                    <path d="M5 18H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/>
+                    <path d="M12 18V6"/>
+                    <path d="M7 18h10"/>
+                    <path d="m12 6 3 3-3 3"/>
+                    <path d="M10 15h4"/>
+                </svg>
+                <h1>Bus en Temps Réel</h1>
+            </div>
+
+            <button id="btn-toggle-planner" class="btn">
+                <span class="material-icons" style="font-size: 20px; margin-right: 4px;">directions</span>
+                <span>Itinéraire</span>
+            </button>
+
+            <button id="btn-toggle-filter" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>
+                </svg>
+                <span>Filtrer</span>
+            </button>
+            
+            <div class="search-container">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input type="text" id="search-bar" placeholder="Rechercher un arrêt...">
+                <div id="search-results" class="hidden"></div>
+            </div>
+
+            <div id="clock">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 6v6l4 2"/>
+                </svg>
+                <span id="current-time">--:--:--</span>
+                <span id="date-indicator">--</span>
+            </div>
+
+            <div id="status-info">
+                <span id="bus-count">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                        <circle cx="12" cy="12" r="10"/>
+                    </svg>
+                    0 bus
+                </span>
+                <span id="data-status">En attente...</span>
+            </div>
+        </div>
+
+        <div id="mode-banner" class="hidden"></div>
+        <div id="map"></div>
+    </div> 
+    
+    <div id="route-filter-panel" class="hidden">
+        <div class="panel-handle"></div>
+        <div class="filter-header">
+            <h3>Filtrer les lignes</h3>
+            <button id="close-filter" class="btn-close">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+        <div class="filter-actions">
+            <button id="select-all-routes" class="btn-small">Toutes</button>
+            <button id="deselect-all-routes" class="btn-small">Aucune</button>
+        </div>
+        <div id="route-checkboxes" class="route-list">
+            </div>
+    </div>
+
+    <div id="planner-panel" class="hidden">
+        <div class="panel-handle"></div>
+        <div class="filter-header">
+            <h3>Calculer un itinéraire</h3>
+            <button id="close-planner" class="btn-close">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+        
+        <div class="planner-inputs">
+            <div class="input-group">
+                <label for="planner-from">Départ</label>
+                <input type="text" id="planner-from" placeholder="Ex: Mairie de Marsac" autocomplete="off">
+                <button id="btn-use-location" class="btn-icon" title="Utiliser ma position">
+                    <span class="material-icons">my_location</span>
+                </button>
+            </div>
+            <div class="input-group">
+                <label for="planner-to">Arrivée</label>
+                <input type="text" id="planner-to" placeholder="Ex: Campus Périgord" autocomplete="off">
+            </div>
+            <button id="btn-search-itinerary" class="btn btn-primary" style="width: 100%; margin-top: 10px; padding: 0.75rem;">
+                Rechercher
+            </button>
+        </div>
+        
+        <div class="planner-results">
+            <div id="planner-loading" class="hidden" style="text-align: center; padding: 20px;">
+                Recherche d'itinéraire...
+            </div>
+            <div id="itinerary-summary"></div>
+            <div id="itinerary-steps">
+                </div>
+        </div>
+    </div>
+
+    <div id="instructions" class="hidden">
+        <div class="instruction-content">
+            <div class="instruction-header">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 16v-4M12 8h.01"/>
+                </svg>
+                <h3>Instructions</h3>
+            </div>
+            <ol>
+                <li>Placez vos fichiers GTFS dans <code>/public/data/gtfs/</code></li>
+                <li>Placez votre fichier GeoJSON dans <code>/public/data/map.geojson</code></li>
+                <li>Rafraîchissez la page</li>
+                <li>Les bus en circulation s'affichent automatiquement</li>
+                <li>Cliquez sur un bus pour voir la ligne, le prochain arrêt et la destination</li>
+            </ol>
+            <button id="close-instructions">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+                Fermer
+            </button>
+        </div>
+    </div>
+
+    <script type="module" src="js/routingService.js"></script>
+    <script type="module" src="js/plannerPanel.js"></script>
+    <script type="module" src="js/main.js"></script>
+
+    <script>
+        function initMap() {
+            // Cette fonction est appelée par Google quand le script est chargé
+            console.log("Google Maps JS (Frontend) est prêt.");
+        }
+    </script>
+</body>
+</html>

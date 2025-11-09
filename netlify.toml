@@ -1,0 +1,21 @@
+[build]
+  # Dossier de ton site web (où est index.html)
+  publish = "public"
+  
+  # Dossier de tes fonctions API (où est calculer-itineraire.js)
+  functions = "api"
+
+# --- C'EST LA PARTIE LA PLUS IMPORTANTE ---
+# Redirige l'appel de ton application (/api/...)
+# vers la fonction Netlify (/.netlify/functions/...)
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200 # "200" signifie que c'est une réécriture, pas une redirection
+
+# Redirection pour les applications "Single Page App"
+# S'assure que rafraîchir la page fonctionne
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
