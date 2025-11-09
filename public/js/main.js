@@ -3,9 +3,9 @@
  * Point d'entrée principal de l'application
  * Orchestre tous les modules et gère l'interface utilisateur
  *
- * VERSION ÉTENDUE: Gère deux modes:
+ * VERSION AUTONOME:
  * 1. "Visualisation" (par défaut, bus en temps réel)
- * 2. "Planification" (calcul d'itinéraire)
+ * 2. "Planification" (calcul d'itinéraire 100% LOCAL)
  */
 
 import { DataManager } from './dataManager.js';
@@ -13,8 +13,8 @@ import { TimeManager } from './timeManager.js';
 import { TripScheduler } from './tripScheduler.js';
 import { BusPositionCalculator } from './busPositionCalculator.js';
 import { MapRenderer } from './mapRenderer.js';
-// NOUVEAU: Import des modules de planification
-import { RoutingService } from './routingService.js';
+// NOUVEAU: Import du calculateur d'itinéraire local
+import { LocalPathfinder } from './localPathfinder.js';
 import { PlannerPanel } from './plannerPanel.js';
 
 let dataManager;
@@ -24,8 +24,8 @@ let busPositionCalculator;
 let mapRenderer;
 let visibleRoutes = new Set();
 
-// NOUVEAU: Modules de planification
-let routingService;
+// NOUVEAU: Modules de planification LOCALE
+let localPathfinder; // R.I.P. routingService
 let plannerPanel;
 let isPlannerMode = false; // Pour savoir si on est en mode itinéraire
 
@@ -82,13 +82,14 @@ async function initializeApp() {
         tripScheduler = new TripScheduler(dataManager);
         busPositionCalculator = new BusPositionCalculator(dataManager);
         
-        // NOUVEAU: Initialisation des nouveaux modules
-        routingService = new RoutingService();
+        // NOUVEAU: Initialisation du pathfinder local
+        localPathfinder = new LocalPathfinder(dataManager);
+
         plannerPanel = new PlannerPanel(
             'planner-panel', 
             dataManager, 
             mapRenderer, 
-            handleItineraryRequest // Je passe la fonction de recherche
+            handleItineraryRequest // Je passe la NOUVELLE fonction de recherche
         );
 
         initializeRouteFilter();
@@ -389,100 +390,141 @@ function exitPlannerMode() {
 
 /**
  * ===================================================================
- * FONCTION MODIFIÉE pour un meilleur rendu visuel
+ * FONCTION TOTALEMENT RÉÉCRITE pour utiliser LocalPathfinder
  * ===================================================================
+ * @param {string} fromPlace - Coordonnées "lat,lon" OU nom d'un lieu
+ * @param {string} toPlace - Coordonnées "lat,lon" OU nom d'un lieu
  */
 async function handleItineraryRequest(fromPlace, toPlace) {
-    console.log(`Demande d'itinéraire de ${fromPlace} à ${toPlace}`);
+    console.log(`Demande d'itinéraire LOCAL de ${fromPlace} à ${toPlace}`);
     isPlannerMode = true;
+
+    // --- Fonctions utilitaires pour trouver les coordonnées ---
+    const isCoordinates = (input) => {
+        if (typeof input !== 'string') return false;
+        const parts = input.split(',');
+        if (parts.length !== 2) return false;
+        return !isNaN(parts[0]) && !isNaN(parts[1]);
+    };
+
+    const getCoordsForPlace = (place) => {
+        if (isCoordinates(place)) {
+            const [lat, lon] = place.split(',').map(Number);
+            return { lat, lon };
+        }
+        // Sinon, chercher un arrêt par nom
+        // (NOTE: ceci suppose que `plannerPanel.js` a été modifié pour ne plus 
+        // utiliser Google Autocomplete, ou qu'il renvoie le nom exact de l'arrêt)
+        const stop = dataManager.masterStops.find(s => s.stop_name.toLowerCase() === place.toLowerCase());
+        if (stop) {
+            return { lat: parseFloat(stop.stop_lat), lon: parseFloat(stop.stop_lon) };
+        }
+        return null;
+    };
+    // --- Fin des fonctions utilitaires ---
+
+    const startCoords = getCoordsForPlace(fromPlace);
+    const endCoords = getCoordsForPlace(toPlace);
+
+    if (!startCoords || !endCoords) {
+        let errorMsg = "Adresse invalide.";
+        if (!startCoords) errorMsg = "Point de départ non trouvé. Veuillez choisir un arrêt ou utiliser votre localisation.";
+        if (!endCoords) errorMsg = "Point d'arrivée non trouvé. Veuillez choisir un arrêt.";
+        plannerPanel.showError(errorMsg);
+        isPlannerMode = false;
+        return;
+    }
+
+    // 2. Préparer et lancer la recherche
+    const departureDate = timeManager.getCurrentDate(); // Utilise la date/heure actuelle
     
     try {
-        // 1. Demander l'itinéraire
-        const itineraryData = await routingService.getItinerary(fromPlace, toPlace);
+        const itineraryData = await localPathfinder.findItinerary(startCoords, endCoords, departureDate);
 
-        if (itineraryData.status !== 'OK' || !itineraryData.routes || itineraryData.routes.length === 0) {
-            let errorMsg = "Aucun itinéraire en transport en commun trouvé.";
-            if (itineraryData.status === 'ZERO_RESULTS') errorMsg = "Aucun itinéraire trouvé.";
-            if (itineraryData.status === 'REQUEST_DENIED') errorMsg = "Erreur d'API. Vérifiez la clé.";
+        if (itineraryData.status !== 'OK') {
+            let errorMsg = "Aucun itinéraire trouvé.";
+            if (itineraryData.status === 'NO_SERVICE') errorMsg = "Aucun service de bus ne circule à cette date.";
+            if (itineraryData.status === 'NO_START_STOPS') errorMsg = "Aucun arrêt accessible à pied depuis votre point de départ.";
+            if (itineraryData.status === 'NO_END_STOPS') errorMsg = "Aucun arrêt ne permet de rejoindre votre destination à pied.";
             plannerPanel.showError(errorMsg);
             isPlannerMode = false;
             return;
         }
 
-        const route = itineraryData.routes[0];
-        const leg = route.legs[0]; // Le trajet A->B
+        const legs = itineraryData.path;
 
-        // 2. Nettoyer la carte
+        // 3. Nettoyer la carte
         mapRenderer.clearAllRoutes(); 
         mapRenderer.hideBusMarkers(); 
         mapRenderer.clearStops();     
-        mapRenderer.clearItinerary(); // Important: efface l'ancien tracé
+        mapRenderer.clearItinerary();
         
-        // 3. DESSINER LE NOUVEAU TRACÉ (LOGIQUE AMÉLIORÉE)
+        // 4. DESSINER LE NOUVEAU TRACÉ (logique locale)
+        const allCoords = [];
         
-        const allCoords = []; // Pour stocker toutes les coordonnées et zoomer dessus
-
-        leg.steps.forEach(step => {
-            // Décode la polyligne pour CETTE étape
-            const stepCoords = routingService.decodePolyline(step.polyline.points);
-            allCoords.push(...stepCoords);
-
+        legs.forEach(leg => {
             let style = {};
+            let legCoords = [];
 
-            if (step.travel_mode === 'WALKING') {
-                // Style pour la marche: gris, pointillés
+            // Obtenir les coords de départ et de fin du "leg"
+            const fromLatLon = leg.fromCoords || { lat: dataManager.getStop(leg.fromStopId).stop_lat, lon: dataManager.getStop(leg.fromStopId).stop_lon };
+            const toLatLon = leg.toCoords || { lat: dataManager.getStop(leg.toStopId).stop_lat, lon: dataManager.getStop(leg.toStopId).stop_lon };
+
+            legCoords = [
+                [parseFloat(fromLatLon.lat), parseFloat(fromLatLon.lon)],
+                [parseFloat(toLatLon.lat), parseFloat(toLatLon.lon)]
+            ];
+
+            if (leg.type === 'WALK') {
                 style = {
-                    color: '#6c757d', // Un gris
+                    color: '#6c757d',
                     weight: 4,
                     opacity: 0.8,
-                    dashArray: '5, 10' // Pointillés
+                    dashArray: '5, 10'
                 };
-            } else if (step.travel_mode === 'TRANSIT') {
-                // Style pour le bus: couleur de la ligne, épais
-                const transitColor = step.transit_details.line.color || '#2563eb'; // Couleur de la ligne ou bleu par défaut
+            } else if (leg.type === 'BUS') {
+                // AMÉLIORATION V2: On pourrait utiliser le GeoJSON de la route
+                // pour dessiner le vrai tracé du bus au lieu d'une ligne droite.
+                const transitColor = leg.route.route_color ? `#${leg.route.route_color}` : '#2563eb';
                 style = {
                     color: transitColor,
                     weight: 6,
                     opacity: 0.9
                 };
-            } else {
-                // Style par défaut (au cas où)
-                style = { color: '#2563eb', weight: 5 };
             }
 
-            // Dessine l'étape sur la couche d'itinéraire du mapRenderer
-            // (L est global car chargé via <script> dans index.html)
-            L.polyline(stepCoords, style).addTo(mapRenderer.itineraryLayer);
+            if (legCoords.length > 0) {
+                allCoords.push(...legCoords);
+                L.polyline(legCoords, style).addTo(mapRenderer.itineraryLayer);
+            }
         });
 
-        // 4. AJOUTER LES MARQUEURS DÉPART/ARRIVÉE
-        
-        const startPoint = [leg.start_location.lat, leg.start_location.lng];
-        L.marker(startPoint, { 
+        // 5. AJOUTER LES MARQUEURS DÉPART/ARRIVÉE
+        L.marker([startCoords.lat, startCoords.lon], { 
             icon: L.divIcon({ className: 'stop-search-marker', html: '<div></div>', iconSize: [12, 12] })
         })
         .addTo(mapRenderer.itineraryLayer)
-        .bindPopup(`<b>Départ:</b> ${leg.start_address}`);
+        .bindPopup(`<b>Départ</b>`);
 
-        const endPoint = [leg.end_location.lat, leg.end_location.lng];
-         L.marker(endPoint, { 
+        L.marker([endCoords.lat, endCoords.lon], { 
             icon: L.divIcon({ className: 'stop-search-marker', html: '<div></div>', iconSize: [12, 12] })
         })
         .addTo(mapRenderer.itineraryLayer)
-        .bindPopup(`<b>Arrivée:</b> ${leg.end_address}`);
+        .bindPopup(`<b>Arrivée</b>`);
 
-        // 5. ZOOMER SUR L'ENSEMBLE DU TRAJET
+        // 6. ZOOMER SUR L'ENSEMBLE DU TRAJET
         if (allCoords.length > 0) {
             const bounds = L.latLngBounds(allCoords);
             mapRenderer.map.fitBounds(bounds, { padding: [50, 50] });
         }
 
-        // 6. Afficher les instructions dans le panneau
+        // 7. Afficher les instructions
+        // (NOTE: plannerPanel.js doit aussi être mis à jour pour lire ce format local)
         plannerPanel.displayItinerary(itineraryData);
 
     } catch (error) {
-        console.error("Erreur lors de la recherche d'itinéraire:", error);
-        plannerPanel.showError(error.message || "Erreur de connexion au service d'itinéraire.");
+        console.error("Erreur lors de la recherche d'itinéraire local:", error);
+        plannerPanel.showError(error.message || "Erreur interne du calculateur d'itinéraire.");
         isPlannerMode = false;
     }
 }
